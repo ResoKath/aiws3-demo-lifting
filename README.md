@@ -51,11 +51,21 @@ project_lifting-weight-DEMO/
 
 ## 🚀 วิธีการใช้งาน (Quick Start)
 
-### 1. ติดตั้งไลบรารี (หากยังไม่ได้ติดตั้ง)
+### 1. ติดตั้งแบบคลิกเดียวจบ (One-Click Setup)
 
+เมื่อเพื่อน clone โปรเจกต์ลงมาในเครื่องครั้งแรก เพียงรันคำสั่งเดียว:
 ```bash
-pip install -r requirements.txt
+python setup.py
 ```
+สคริปต์ `setup.py` จะจัดการทุกอย่างให้อัตโนมัติ:
+- สร้าง Virtual Environment (`.venv`)
+- ติดตั้งไลบรารีทั้งหมดจาก `requirements.txt`
+- สร้างโฟลเดอร์ตาม Schema ให้ครบถ้วน
+- ดาวน์โหลดโมเดล MediaPipe (`pose_landmarker_lite.task`) ลง `runs/checkpoints/`
+- ตั้งค่าให้ VS Code ชี้ไปที่ `.venv` ทันที
+- ตรวจสอบโปรแกรม `ffmpeg` ในเครื่อง
+
+---
 
 ### 2. รันวิเคราะห์ผ่าน CLI (main.py)
 
