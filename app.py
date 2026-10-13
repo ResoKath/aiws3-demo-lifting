@@ -1,10 +1,10 @@
 """
-NIOSH Lifting Weight Limit & Repetition Analyzer - Web Application (Task 1-4)
-รายวิชา CP413705 AI Workshop III - วิทยาลัยการคอมพิวเตอร์ มหาวิทยาลัยขอนแก่น (กลุ่ม G10)
+NIOSH Lifting Weight Limit & Repetition Analyzer - Streamlit Web Application
+CP413705 AI Workshop III - KKU (Group G10)
 
-วิธีรัน:
-  1. กดปุ่ม Run Python File ใน VS Code ได้เลย (สคริปต์จะเปิด Streamlit ให้อัตโนมัติ)
-  2. หรือรันผ่าน Terminal: ./.venv/bin/streamlit run app.py
+Run using:
+  streamlit run app.py
+  (or click 'Run Python File' in VS Code)
 """
 
 import os
@@ -13,7 +13,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-# ถ้ารันด้วย `python app.py` โดยตรง ให้เรียก `streamlit run app.py` อัตโนมัติ
+# Auto-redirect to streamlit run if run directly with python app.py
 if __name__ == "__main__" and os.environ.get("STREAMLIT_RUN_ACTIVE") != "1":
     try:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
@@ -28,163 +28,27 @@ if __name__ == "__main__" and os.environ.get("STREAMLIT_RUN_ACTIVE") != "1":
 import cv2
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
 
-from lifting_engine import (
-    AnalysisConfig,
+from src.dataset import (
     COL_NAMES,
-    REACH_LIMITS_CM,
     ROW_NAMES,
     WEIGHT_LIMITS_KG,
-    ZONE_CODE,
     infer_subject_height,
-    run_pipeline,
+    parse_protocol_filename,
 )
+from src.model import AnalysisConfig
+from src.utils import build_timeseries_figure
+from main import run_pipeline
 
 BASE_DIR = Path(__file__).resolve().parent
-VIDEOS_DIR = BASE_DIR / "videos"
-OUTPUT_DIR = BASE_DIR / "weight_limit_output"
-VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+DATA_RAW_DIR = BASE_DIR / "data" / "raw"
+INPUT_DIR = BASE_DIR / "input"
+RUNS_LOGS_DIR = BASE_DIR / "runs" / "logs"
 
-
-def build_timeseries_figure(
-    df: pd.DataFrame,
-    reps_df: pd.DataFrame,
-    calib: dict,
-    cfg: AnalysisConfig,
-):
-    """สร้างกราฟเส้นเวลา 4 แถว: V, H, Angles (Twist/Orient), และ Max Weight Limit พร้อมมาร์คจุดครบรอบยก"""
-    fig, axes = plt.subplots(4, 1, figsize=(11, 8.5), sharex=True)
-    t = df["time_s"]
-    blue, orange, green, red, grey = (
-        "#1a73e8",
-        "#e8710a",
-        "#1e8e3e",
-        "#d93025",
-        "#9aa0a6",
-    )
-
-    # 1. ความสูงของมือ V (cm)
-    axes[0].plot(t, df["V_cm"], color=blue, lw=2, label="Hand Height V (cm)")
-    if calib:
-        for name, col_line in [
-            ("knee", "#fbbc04"),
-            ("waist", "#f29900"),
-            ("shoulder", "#ea4335"),
-        ]:
-            lvl = calib.get(f"{name}_cm")
-            if lvl is not None:
-                axes[0].axhline(lvl, color=col_line, ls="--", lw=1.2, alpha=0.8)
-                axes[0].text(
-                    t.iloc[-1] if len(t) else 0,
-                    lvl,
-                    f" {name} ({lvl:.0f}cm)",
-                    va="center",
-                    fontsize=8.5,
-                    color=col_line,
-                )
-    axes[0].set_ylabel("V (cm)")
-    axes[0].set_title("1. Hand Vertical Height (V) & Body Zone Levels", fontsize=10, fontweight="bold")
-
-    # 2. ระยะเอื้อมแนวราบ H (cm)
-    axes[1].plot(t, df["H_cm"], color=blue, lw=2, label="Horizontal Reach H (cm)")
-    for cm, label in zip(REACH_LIMITS_CM, ['Near/Mild (7" = 17.8cm)', 'Mild/Ext (12" = 30.5cm)']):
-        axes[1].axhline(cm, color=grey, ls="--", lw=1.2)
-        axes[1].text(
-            t.iloc[-1] if len(t) else 0,
-            cm,
-            f" {label}",
-            va="center",
-            fontsize=8.5,
-            color="#5f6368",
-        )
-    axes[1].set_ylabel("H (cm)")
-    axes[1].set_title("2. Horizontal Reach Distance (H) from Ankle Midpoint", fontsize=10, fontweight="bold")
-
-    # 3. มุมบิดตัว (Twist) และ มุมหันเทียบกล้อง (Orientation)
-    axes[2].plot(t, df["twist_deg"], color=red, lw=2, label="Twist Angle (deg)")
-    axes[2].plot(
-        t,
-        df["orientation_deg"],
-        color=orange,
-        lw=1.5,
-         alpha=0.85,
-        label="Camera Orientation (deg)",
-    )
-    axes[2].axhline(cfg.twist_warn_deg, color=red, ls="--", lw=1.2, alpha=0.7)
-    axes[2].text(
-        t.iloc[-1] if len(t) else 0,
-        cfg.twist_warn_deg,
-        f" Twist Limit ({cfg.twist_warn_deg:.0f}°)",
-        va="center",
-        fontsize=8.5,
-        color=red,
-    )
-    axes[2].set_ylabel("Angle (deg)")
-    axes[2].legend(frameon=False, loc="upper left", ncol=2, fontsize=8.5)
-    axes[2].set_title("3. Trunk Twist Angle & Pelvis Orientation to Camera", fontsize=10, fontweight="bold")
-
-    # 4. น้ำหนักสูงสุดที่ยอมรับได้ (Max Acceptable Weight Limit - kg)
-    axes[3].step(t, df["limit_kg"], where="post", color=green, lw=2, label="Acceptable Weight Limit (kg)")
-    axes[3].set_ylim(0, 46)
-    axes[3].set_ylabel("Max Weight (kg)")
-    axes[3].set_xlabel("Time (seconds)")
-    axes[3].set_title("4. NIOSH Max Acceptable Weight Limit (kg) & Repetition Markers", fontsize=10, fontweight="bold")
-
-    # ไฮไลต์ช่วง Calibrate และช่วงรอบการยกแต่ละรอบ
-    for ax in axes:
-        ax.axvspan(0, cfg.calib_seconds, color="#e8eaed", alpha=0.7, zorder=0, label="Calibration")
-        ax.grid(alpha=0.25)
-        if not reps_df.empty:
-            for _, rep in reps_df.iterrows():
-                ax.axvspan(
-                    rep["start_time_s"],
-                    rep["end_time_s"],
-                    color="#e6f4ea",
-                    alpha=0.45,
-                    zorder=0,
-                )
-                ax.axvline(rep["end_time_s"], color=green, ls=":", lw=1.3, alpha=0.85)
-
-    if not reps_df.empty:
-        for _, rep in reps_df.iterrows():
-            mid_t = 0.5 * (rep["start_time_s"] + rep["end_time_s"])
-            axes[3].text(
-                mid_t,
-                42,
-                f"Rep #{int(rep['rep_number'])}\n(min {int(rep['min_limit_kg'])}kg)",
-                ha="center",
-                va="top",
-                fontsize=8.5,
-                fontweight="bold",
-                color=green,
-                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=green, alpha=0.85),
-            )
-
-    plt.tight_layout()
-    return fig
-
-
-def parse_protocol_filename(stem: str):
-    """แยกข้อมูลเงื่อนไขจากชื่อไฟล์ตามโพรโทคอล เช่น G10_S02_BK-WS_RM_T0_PN_01"""
-    found = re.search(r"_([A-Z]{2})-([A-Z]{2})_(R[NMF])_(T[01])_", stem)
-    if not found:
-        return None
-    origin, dest, reach_code, twist_code = found.groups()
-    reach_map = {"RN": "Near", "RM": "Mild", "RF": "Extended"}
-    twist_map = {"T0": "No Twist (< 45°)", "T1": "With Twist (≥ 45°)"}
-    return {
-        "origin_code": origin,
-        "origin_zone": ZONE_CODE.get(origin, origin),
-        "dest_code": dest,
-        "dest_zone": ZONE_CODE.get(dest, dest),
-        "reach_code": reach_code,
-        "reach_expected": reach_map.get(reach_code, reach_code),
-        "twist_code": twist_code,
-        "twist_expected": twist_map.get(twist_code, twist_code),
-    }
+DATA_RAW_DIR.mkdir(parents=True, exist_ok=True)
+INPUT_DIR.mkdir(parents=True, exist_ok=True)
+RUNS_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def main():
@@ -216,36 +80,35 @@ def main():
     )
 
     # ==========================================================================
-    # Sidebar: เลือกไฟล์วิดีโอและปรับจูนค่าพารามิเตอร์ (Task 1)
+    # Sidebar
     # ==========================================================================
     with st.sidebar:
         st.header("🎬 1. เลือกวิดีโอทดสอบ")
         source_mode = st.radio(
             "แหล่งที่มาของวิดีโอ",
-            ["เลือกจากคลังคลิปกลุ่ม G10 (videos/)", "อัปโหลดคลิปวิดีโอใหม่ (.mp4/.mov)"],
+            ["คลังคลิปกลุ่ม G10 (data/raw/)", "อัปโหลดคลิปวิดีโอใหม่ (input/)"],
         )
 
         selected_video_path = None
-        if source_mode == "เลือกจากคลังคลิปกลุ่ม G10 (videos/)":
+        if source_mode == "คลังคลิปกลุ่ม G10 (data/raw/)":
             video_files = sorted(
-                [p.name for p in VIDEOS_DIR.glob("*.mp4")],
+                [p.name for p in DATA_RAW_DIR.glob("*.mp4")],
                 key=lambda x: (0 if "MultiLift" in x else 1, x),
             )
             if not video_files:
-                st.warning("ไม่พบไฟล์ .mp4 ในโฟลเดอร์ videos/")
+                st.warning("ไม่พบไฟล์ .mp4 ใน data/raw/")
             else:
-                default_idx = 0
                 selected_name = st.selectbox(
                     "เลือกไฟล์วิดีโอ",
                     video_files,
-                    index=default_idx,
+                    index=0,
                     help="คลิป G10_S02_MultiLift_3Reps_Test.mp4 คือคลิปทดสอบการยกต่อเนื่อง 3 รอบ",
                 )
-                selected_video_path = VIDEOS_DIR / selected_name
+                selected_video_path = DATA_RAW_DIR / selected_name
         else:
             uploaded = st.file_uploader("อัปโหลดวิดีโอ (.mp4, .mov)", type=["mp4", "mov"])
             if uploaded is not None:
-                save_path = VIDEOS_DIR / uploaded.name
+                save_path = INPUT_DIR / uploaded.name
                 save_path.write_bytes(uploaded.read())
                 selected_video_path = save_path
                 st.success(f"บันทึกไฟล์แล้ว: {uploaded.name}")
@@ -282,20 +145,13 @@ def main():
             step=5.0,
         )
 
-        with st.expander("🔧 ตั้งค่าขั้นสูง (Advanced Calibration & Counter)"):
+        with st.expander("🔧 ตั้งค่าขั้นสูง (Advanced Settings)"):
             nose_above_foot = st.slider(
                 "อัตราส่วน พื้น→จมูก / ส่วนสูง (NOSE_ABOVE_FOOT)",
                 min_value=0.850,
                 max_value=0.950,
                 value=0.905,
                 step=0.005,
-            )
-            camera_fov_deg = st.slider(
-                "มุมมองกล้อง (CAMERA_FOV_DEG)",
-                min_value=55.0,
-                max_value=85.0,
-                value=70.0,
-                step=1.0,
             )
             table_length_cm = st.slider(
                 "ความยาวตารางด้านหน้า (TABLE_LENGTH_CM)",
@@ -311,13 +167,6 @@ def main():
                 value=18.0,
                 step=2.0,
             )
-            min_rep_duration_s = st.slider(
-                "เวลาขั้นต่ำต่อ 1 รอบการยก (วินาที)",
-                min_value=0.5,
-                max_value=3.0,
-                value=0.8,
-                step=0.1,
-            )
 
         run_btn = st.button(
             "🚀 เริ่มวิเคราะห์วิดีโอ (Start Analysis)",
@@ -327,7 +176,7 @@ def main():
         )
 
     # ==========================================================================
-    # ส่วนประมวลผลและแสดงผลลัพธ์
+    # Processing and Display
     # ==========================================================================
     if selected_video_path is None:
         st.info("👈 กรุณาเลือกไฟล์วิดีโอจากแถบด้านซ้ายเพื่อเริ่มต้น")
@@ -337,15 +186,11 @@ def main():
         subject_height_cm=subject_height_cm,
         calib_seconds=calib_seconds,
         nose_above_foot=nose_above_foot,
-        camera_fov_deg=camera_fov_deg,
         twist_warn_deg=twist_warn_deg,
         table_length_cm=table_length_cm,
         min_vertical_travel_cm=min_vertical_travel_cm,
-        min_rep_duration_s=min_rep_duration_s,
     )
 
-    # ตรวจว่ามีผลลัพธ์ใน session_state หรือไฟล์ที่เคยรันไว้แล้วหรือไม่
-    state_key = f"{selected_video_path.name}_{subject_height_cm}_{calib_seconds}_{twist_warn_deg}"
     if run_btn:
         st.subheader(f"⏳ กำลังประมวลผล: `{selected_video_path.name}`")
         prog_bar = st.progress(0, text="กำลังเริ่มต้น MediaPipe Pose Landmarker...")
@@ -383,7 +228,7 @@ def main():
 
         res = run_pipeline(
             video_path=selected_video_path,
-            out_dir=OUTPUT_DIR,
+            out_dir=RUNS_LOGS_DIR,
             cfg=cfg,
             progress_callback=_st_progress,
         )
@@ -392,15 +237,13 @@ def main():
         live_metrics_placeholder.empty()
         st.session_state["last_result"] = res
         st.session_state["last_video_name"] = selected_video_path.name
-        st.session_state["last_cfg"] = cfg
 
-    # หากยังไม่ได้กดรันในรอบนี้ แต่มีไฟล์ที่วิเคราะห์ไว้แล้วใน weight_limit_output ให้โหลดมาแสดงได้ทันที
     res = st.session_state.get("last_result")
     if res is None or st.session_state.get("last_video_name") != selected_video_path.name:
         stem = selected_video_path.stem
-        existing_video = OUTPUT_DIR / f"{stem}_analyzed.mp4"
-        existing_csv = OUTPUT_DIR / f"{stem}_frames.csv"
-        existing_reps = OUTPUT_DIR / f"{stem}_reps_summary.csv"
+        existing_video = RUNS_LOGS_DIR / f"{stem}_analyzed.mp4"
+        existing_csv = RUNS_LOGS_DIR / f"{stem}_frames.csv"
+        existing_reps = RUNS_LOGS_DIR / f"{stem}_reps_summary.csv"
         if existing_video.is_file() and existing_csv.is_file():
             df_loaded = pd.read_csv(existing_csv)
             reps_loaded = (
@@ -447,7 +290,7 @@ def main():
     )
 
     # ==========================================================================
-    # แถบ KPI Cards สรุปผลหลัก
+    # KPI Metric Cards
     # ==========================================================================
     st.subheader(f"📊 สรุปผลการวิเคราะห์: `{selected_video_path.name}`")
     k1, k2, k3, k4, k5 = st.columns(5)
@@ -482,7 +325,7 @@ def main():
     )
 
     # ==========================================================================
-    # แท็บแสดงผลละเอียด 3 ส่วน
+    # Tabs
     # ==========================================================================
     tab_video, tab_reps, tab_charts = st.tabs(
         [
@@ -537,7 +380,7 @@ def main():
     with tab_reps:
         st.markdown("#### 🔄 ตารางสรุปผลการยกแยกตามรอบ (Per-Repetition Summary)")
         if reps_df.empty:
-            st.warning("ไม่พบรอบการยกที่สมบูรณ์ในคลิปนี้ (เช่น อาจเป็นคลิป Negative หรือระยะเคลื่อนที่แนวดิ่งต่ำกว่าเกณฑ์)")
+            st.warning("ไม่พบรอบการยกที่สมบูรณ์ในคลิปนี้")
         else:
             display_reps = reps_df.rename(
                 columns={
@@ -588,7 +431,13 @@ def main():
 
     with tab_charts:
         st.markdown("#### 📈 กราฟเส้นเวลา (Time-Series Analysis: V, H, Twist, Weight Limit)")
-        fig = build_timeseries_figure(df, reps_df, calib, cfg)
+        fig = build_timeseries_figure(
+            df,
+            reps_df,
+            calib,
+            twist_warn_deg=cfg.twist_warn_deg,
+            calib_seconds=cfg.calib_seconds,
+        )
         st.pyplot(fig, use_container_width=True)
 
         st.divider()
@@ -624,4 +473,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,4 +1,0 @@
-rep_number,start_frame,end_frame,start_time_s,end_time_s,duration_s,origin_zone,dest_zone,zone_path,min_V_cm,max_V_cm,vertical_travel_cm,max_H_cm,max_twist_deg,min_limit_kg
-1,118,258,3.93,8.6,4.67,Below Knee,Waist-Shoulder,Below Knee -> Waist-Shoulder,39.5,108.3,68.8,50.6,8.9,16
-2,374,515,12.47,17.17,4.7,Below Knee,Waist-Shoulder,Below Knee -> Waist-Shoulder,41.6,107.9,66.3,50.3,9.8,16
-3,630,771,21.0,25.7,4.7,Below Knee,Waist-Shoulder,Below Knee -> Waist-Shoulder,37.0,106.6,69.6,51.4,9.5,16

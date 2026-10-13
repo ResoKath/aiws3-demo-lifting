@@ -1,0 +1,25 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Large binary checkpoints (model will be auto-downloaded if absent)
+runs/checkpoints/*.task
+runs/checkpoints/*.pt
+runs/checkpoints/*.onnx
+
+# Output videos and logs (keep folder structure)
+runs/logs/*.mp4
+runs/logs/*.csv
+!runs/logs/.gitkeep
+
+# Operating System
+.DS_Store
+Thumbs.db
+
